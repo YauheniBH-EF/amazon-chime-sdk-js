@@ -9,28 +9,41 @@ import MediaStreamBrokerObserver from '../mediastreambrokerobserver/MediaStreamB
 
 export default class ContentShareMediaStreamBroker implements MediaStreamBroker {
   private static defaultFrameRate = 15;
-  private _mediaStream: MediaStream;
+  private _mediaStream: MediaStream | undefined;
+  private _mediaStreamBrokerObservers: Set<MediaStreamBrokerObserver> = new Set<
+    MediaStreamBrokerObserver
+  >();
 
-  constructor(private logger: Logger) {}
+  constructor(private logger: Logger) { }
 
-  get mediaStream(): MediaStream {
+  get mediaStream(): MediaStream | undefined {
     return this._mediaStream;
   }
 
-  set mediaStream(mediaStream: MediaStream) {
+  set mediaStream(mediaStream: MediaStream | undefined) {
     this._mediaStream = mediaStream;
+
+    for (const observer of this._mediaStreamBrokerObservers) {
+      observer.videoInputDidChange?.(this.mediaStream);
+      observer.audioInputDidChange?.(this.mediaStream);
+    }
   }
 
   async acquireAudioInputStream(): Promise<MediaStream> {
-    if (this._mediaStream.getAudioTracks().length === 0) {
+    if (!this.mediaStream || this.mediaStream.getAudioTracks().length === 0) {
       this.logger.info('No audio stream available. Synthesizing an audio stream.');
       return DefaultDeviceController.synthesizeAudioDevice(0) as MediaStream;
     }
-    return this._mediaStream;
+
+    return this.mediaStream;
   }
 
   async acquireVideoInputStream(): Promise<MediaStream> {
-    return this._mediaStream;
+    if (!this.mediaStream) {
+      throw new Error(`No media stream available.`);
+    }
+
+    return this.mediaStream;
   }
 
   async acquireDisplayInputStream(streamConstraints: MediaStreamConstraints): Promise<MediaStream> {
@@ -105,7 +118,12 @@ export default class ContentShareMediaStreamBroker implements MediaStreamBroker 
         track.stop();
       }
     }
-    this.mediaStream = null;
+    this.mediaStream = undefined;
+
+    for (const observer of this._mediaStreamBrokerObservers) {
+      observer.videoInputDidChange?.(this.mediaStream);
+      observer.audioInputDidChange?.(this.mediaStream);
+    }
   }
 
   muteLocalAudioInputStream(): void {
@@ -116,7 +134,11 @@ export default class ContentShareMediaStreamBroker implements MediaStreamBroker 
     throw new Error('unsupported');
   }
 
-  addMediaStreamBrokerObserver(_observer: MediaStreamBrokerObserver): void {}
+  addMediaStreamBrokerObserver(_observer: MediaStreamBrokerObserver): void {
+    this._mediaStreamBrokerObservers.add(_observer);
+  }
 
-  removeMediaStreamBrokerObserver(_observer: MediaStreamBrokerObserver): void {}
+  removeMediaStreamBrokerObserver(_observer: MediaStreamBrokerObserver): void {
+    this._mediaStreamBrokerObservers.delete(_observer);
+  }
 }
